@@ -6,10 +6,10 @@
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
         <div>
           <h2 class="text-2xl font-extrabold text-white mb-2">
-            3 Aylık İndirimli Gemini Pro Hesabı Oluştur & Aktifleştir
+            Google AI Pro (5 TB) Otomatik Abonelik Botu
           </h2>
           <p class="text-sm text-gray-300 max-w-2xl">
-            Yeni Google/Gmail hesabını otomatik açar, indirimli Gemini Pro kampanyasına yönlendirir, kart & SMS onayının ardından Antigravity ve YouTube hesaplarınızı 3 aylık yeni hesaba günceller.
+            Yeni Google/Gmail hesabını otomatik oluşturur, Google One AI Pro sayfasından ₺179,99/ay promosyon fiyatıyla abone eder, 3D Secure SMS onayını bekler, ardından Antigravity ve YouTube hesaplarınızı yeni hesaba günceller.
           </p>
         </div>
 

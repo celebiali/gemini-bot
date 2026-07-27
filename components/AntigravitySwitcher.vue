@@ -9,7 +9,7 @@
         Aktif Hesap Hazır
       </span>
     </h3>
-    <p class="text-sm text-gray-400 mb-6">Yeni satın aldığınız indirimli Gemini Pro hesabını ana Antigravity ve YouTube oturumu olarak güncelleyin.</p>
+    <p class="text-sm text-gray-400 mb-6">Yeni satın aldığınız Google AI Pro hesabını ana Antigravity ve YouTube oturumu olarak güncelleyin.</p>
 
     <div v-if="activeAccount" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
       <!-- Antigravity IDE Card -->
@@ -49,7 +49,7 @@
     </div>
 
     <div v-else class="bg-gray-900/50 rounded-xl p-6 text-center text-gray-400 text-sm border border-gray-800">
-      Henüz tanımlı aktif bir Gemini Pro hesabı yok. Yukarıdaki sihirbazı başlatarak 3 aylık indirimli hesabınızı oluşturun.
+      Henüz tanımlı aktif bir Google AI Pro hesabı yok. Yukarıdaki sihirbazı başlatarak yeni hesabınızı oluşturun.
     </div>
 
     <!-- Sync Toast Message -->

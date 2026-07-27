@@ -11,11 +11,11 @@ export default defineNuxtConfig({
 
   app: {
     head: {
-      title: 'Gemini Pro 3-Month Automated Switcher Bot',
+      title: 'Google AI Pro Otomatik Abonelik Botu',
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'description', content: 'Automate Google account signup, Gemini Pro discount checkout, and YouTube/Antigravity account switching.' }
+        { name: 'description', content: 'Google hesabı oluşturma, Google One AI Pro aboneliği ve Antigravity/YouTube hesap güncelleme otomasyonu.' }
       ],
       link: [
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },

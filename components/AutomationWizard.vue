@@ -32,22 +32,22 @@
     </div>
 
     <!-- Step Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div
         v-for="(stepItem, index) in steps"
         :key="stepItem.id"
-        class="p-3.5 rounded-xl border transition-all flex items-center gap-3"
+        class="p-3 rounded-xl border transition-all flex items-center gap-2.5"
         :class="getStepClass(stepItem.id)"
       >
         <div
-          class="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0"
+          class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-[11px] shrink-0"
           :class="getStepIconClass(stepItem.id)"
         >
           {{ index + 1 }}
         </div>
         <div class="min-w-0">
-          <p class="text-xs font-semibold text-gray-200 truncate">{{ stepItem.title }}</p>
-          <p class="text-[11px] text-gray-400 truncate">{{ stepItem.sub }}</p>
+          <p class="text-[11px] font-semibold text-gray-200 truncate">{{ stepItem.title }}</p>
+          <p class="text-[10px] text-gray-400 truncate">{{ stepItem.sub }}</p>
         </div>
       </div>
     </div>
@@ -69,10 +69,12 @@ const props = defineProps<{
 defineEmits(['stop'])
 
 const steps = [
-  { id: 'mail', title: '1. Mail Açma', sub: 'Yeni Gmail Hesabı' },
-  { id: 'gemini', title: '2. Gemini Pro', sub: 'İndirimli Kampanya' },
-  { id: 'payment', title: '3. Ödeme & SMS', sub: 'Kart ve 3DS Onayı' },
-  { id: 'sync', title: '4. Aktifleme', sub: 'Antigravity & Youtube' }
+  { id: 'mail', title: 'Gmail Hesabı', sub: 'Yeni Hesap Oluştur' },
+  { id: 'google_one', title: 'Google One AI', sub: 'Pro Sayfasına Git' },
+  { id: 'pro_plan', title: 'Pro Plan Seç', sub: 'AI Pro Üyesi Ol' },
+  { id: 'subscribe', title: 'Abone Ol', sub: 'Google Play Onayı' },
+  { id: '3ds_sms', title: '3DS SMS', sub: 'Banka Onayı' },
+  { id: 'sync', title: 'Aktifleme', sub: 'Antigravity & YT' }
 ]
 
 const statusBadgeClass = computed(() => {
@@ -84,8 +86,10 @@ const statusBadgeClass = computed(() => {
 
 function getStepCategory(stepStr: string): string {
   if (['generating_credentials', 'launching_browser', 'creating_google_account', 'waiting_phone_number', 'waiting_sms_code'].includes(stepStr)) return 'mail'
-  if (['navigating_gemini_offer'].includes(stepStr)) return 'gemini'
-  if (['waiting_payment_checkout'].includes(stepStr)) return 'payment'
+  if (['navigating_google_one_ai'].includes(stepStr)) return 'google_one'
+  if (['clicking_pro_plan'].includes(stepStr)) return 'pro_plan'
+  if (['waiting_google_play_dialog', 'clicking_subscribe'].includes(stepStr)) return 'subscribe'
+  if (['waiting_3ds_sms', 'waiting_payment_checkout'].includes(stepStr)) return '3ds_sms'
   if (['extracting_tokens', 'synced_antigravity', 'completed'].includes(stepStr)) return 'sync'
   return 'none'
 }

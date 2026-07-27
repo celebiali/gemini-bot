@@ -6,10 +6,10 @@
         3 Aylık Hesap Geçmişi & Aylık Ödeme Takvimi
       </span>
       <span class="text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30 px-3 py-1 rounded-full font-medium">
-        Aylık Ödeme Modeli (1. Ay - 2. Ay - 3. Ay)
+        Aylık Ödeme ₺179,99/ay (Promosyon) → ₺869,99/ay
       </span>
     </h3>
-    <p class="text-sm text-gray-400 mb-6">Açılan Gemini Pro hesaplarınız, her aya ait 3 ayrı ödeme tarihi ve 3. ay sonunda yeni hesaba geçiş takvimi.</p>
+    <p class="text-sm text-gray-400 mb-6">Açılan Google AI Pro hesaplarınız, her aya ait 3 ayrı ödeme tarihi ve 3. ay sonunda yeni hesaba geçiş takvimi.</p>
 
     <div v-if="accounts && accounts.length > 0" class="space-y-4">
       <div
@@ -80,7 +80,7 @@
     </div>
 
     <div v-else class="bg-gray-900/50 rounded-xl p-8 text-center text-gray-500 text-sm border border-gray-800">
-      Henüz kayıtlı hesap geçmişi bulunmuyor. İlk 3 aylık hesabınızı oluşturmak için yukarıdaki otomasyonu başlatın.
+      Henüz kayıtlı hesap geçmişi bulunmuyor. İlk Google AI Pro hesabınızı oluşturmak için yukarıdaki otomasyonu başlatın.
     </div>
   </div>
 </template>
