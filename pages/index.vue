@@ -36,6 +36,7 @@
     <ManualInputModal
       v-if="automationState.requiresInput"
       :requires-input="automationState.requiresInput"
+      :account="automationState.account"
       @submit-input="handleInputSubmit"
     />
 
@@ -78,6 +79,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import AutomationWizard from '~/components/AutomationWizard.vue'
+import ManualInputModal from '~/components/ManualInputModal.vue'
+import LiveBrowserStream from '~/components/LiveBrowserStream.vue'
+import AntigravitySwitcher from '~/components/AntigravitySwitcher.vue'
+import AccountHistory from '~/components/AccountHistory.vue'
 
 const starting = ref(false)
 const accounts = ref<any[]>([])

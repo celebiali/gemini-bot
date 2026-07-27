@@ -91,14 +91,12 @@ class PlaywrightWorkerService {
   }
 
   public getState(): AutomationState {
+    if (this.activeState.step !== 'idle') {
+      return this.activeState
+    }
     const fileState = this.loadStateFromFile()
-    if (fileState) {
-      // Prefer file state if memory state is idle or older
-      if (this.activeState.step === 'idle' && fileState.step !== 'idle') {
-        this.activeState = fileState
-      } else if (fileState.updatedAt && this.activeState.updatedAt && fileState.updatedAt > this.activeState.updatedAt) {
-        this.activeState = fileState
-      }
+    if (fileState && fileState.step !== 'idle') {
+      this.activeState = fileState
     }
     return this.activeState
   }
@@ -206,11 +204,20 @@ class PlaywrightWorkerService {
       return { success: true }
     }
 
-    const currentReq = this.activeState.requiresInput
     if (currentReq) {
       this.log(`Kullanıcı girdisi alındı (${currentReq.type}): ${input ? input.replace(/./g, '*') : 'Devam'}`, 'info')
+      if (currentReq.type === 'payment_confirm') {
+        this.activeState.requiresInput = null
+        await this.processAfterPayment()
+        return { success: true }
+      }
       this.activeState.requiresInput = null
       this.saveStateToFile()
+      return { success: true }
+    }
+
+    if (this.activeState.step === 'waiting_payment_checkout') {
+      await this.processAfterPayment()
       return { success: true }
     }
 
@@ -264,7 +271,8 @@ class PlaywrightWorkerService {
     const lastName = 'Celebi'
 
     this.activeState.account = { email, password, firstName, lastName }
-    this.log(`Yeni Oluşturulacak Mail: ${email}`, 'success')
+    this.log(`Yeni Mail: ${email}`, 'success')
+    this.log(`Oluşturulan Otomatik Şifre: ${password}`, 'success')
 
     // Start background execution flow asynchronously
     this.runAutomationLoop(firstName, lastName, username, password, options?.headless ?? false).catch((err) => {
@@ -306,15 +314,15 @@ class PlaywrightWorkerService {
     if (!this.browser) {
       // Fallback flow for serverless / no-browser environments
       this.log('Hesap ve kampanya adımları simülasyon modunda hazırlanıyor...', 'info')
-      await new Promise(r => setTimeout(r, 1500))
+      await new Promise(r => setTimeout(r, 800))
       this.updateStep('navigating_gemini_offer', 'Gemini Pro Kampanyasına Gidiliyor', 'Gemini Advanced / Google One indirim teklifi hazırlanıyor.', 60)
       this.updateStep('waiting_payment_checkout', '1. Ay Ödemesi & 3DS SMS Onayı Bekleniyor', 'Lütfen 1. Ay ödemeniz için kart bilgilerinizi girip SMS onayını tamamlayın.', 85)
-      await this.waitForUserInput(
-        'payment_confirm',
-        '1. Ay İndirimli Ödeme ve 3D Secure SMS Onayı',
-        '1. Ay ödemesi için kart bilgilerinizi girip SMS onay şifresini onayladıktan sonra aşağıdaki butona tıklayın:'
-      )
-      await this.processAfterPayment()
+      this.activeState.requiresInput = {
+        type: 'payment_confirm',
+        title: '1. Ay İndirimli Ödeme ve 3D Secure SMS Onayı',
+        description: '1. Ay ödemesi için kart bilgilerinizi girip SMS onay şifresini onayladıktan sonra aşağıdaki butona tıklayın:',
+      }
+      this.saveStateToFile()
       return
     }
 
@@ -331,133 +339,200 @@ class PlaywrightWorkerService {
     this.updateStep('creating_google_account', 'Google Kayıt Sayfası Açılıyor', 'Google yeni hesap oluşturma ekranına gidiliyor.', 30)
     await this.page.goto('https://accounts.google.com/signup', { waitUntil: 'domcontentloaded', timeout: 30000 })
     await this.captureScreenshot()
-    await this.page.waitForTimeout(2000)
 
-    // Name Screen
-    const nameInput = await this.page.$('input[name="firstName"], input[id="firstName"]')
-    if (nameInput) {
-      this.log('Ad ve Soyad bilgileri giriliyor...', 'info')
-      await nameInput.fill(firstName)
-      const lastNameInput = await this.page.$('input[name="lastName"], input[id="lastName"]')
-      if (lastNameInput) await lastNameInput.fill(lastName)
-      await this.captureScreenshot()
-      await this.clickNextButton()
-      await this.page.waitForTimeout(2500)
-    }
+    let stepAttempts = 0
+    let lastHandledStep = ''
 
-    // Step 2: Basic Info (Birthday & Gender)
-    const dayInput = await this.page.$('input[name="day"], #day')
-    if (dayInput) {
-      this.log('Doğum tarihi ve cinsiyet bilgileri dolduruluyor...', 'info')
-      await dayInput.fill('15')
-      
-      const yearInput = await this.page.$('input[name="year"], #year')
-      if (yearInput) await yearInput.fill('1995')
-
-      const monthSelect = await this.page.$('select[name="month"], #month')
-      if (monthSelect) {
-        await monthSelect.selectOption({ index: 1 }).catch(async () => {
-          await monthSelect.selectOption({ value: '1' }).catch(() => {})
-        })
-      }
-
-      const genderSelect = await this.page.$('select[name="gender"], #gender')
-      if (genderSelect) {
-        await genderSelect.selectOption({ index: 1 }).catch(async () => {
-          await genderSelect.selectOption({ value: '1' }).catch(() => {})
-        })
-      }
-
-      await this.captureScreenshot()
-      await this.clickNextButton()
-      await this.page.waitForTimeout(2500)
-    }
-
-    // Step 3: Username Screen
-    const usernameInput = await this.page.$('input[name="Username"], #username')
-    const optionRadio = await this.page.$('input[type="radio"]')
-
-    if (usernameInput && await usernameInput.isVisible()) {
-      this.log(`Kullanıcı adı giriliyor: ${username}`, 'info')
-      await usernameInput.fill(username)
-      await this.clickNextButton()
-      await this.page.waitForTimeout(2500)
-    } else if (optionRadio) {
-      this.log('Önerilen Gmail adresi seçiliyor...', 'info')
-      await optionRadio.click()
-      await this.clickNextButton()
-      await this.page.waitForTimeout(2500)
-    }
-
-    // Step 4: Password Creation
-    const pwdInput = await this.page.$('input[name="Passwd"], input[type="password"]')
-    if (pwdInput && await pwdInput.isVisible()) {
-      this.log('Şifre belirleniyor...', 'info')
-      await pwdInput.fill(password)
-      const confirmPwdInput = await this.page.$('input[name="ConfirmPasswd"]')
-      if (confirmPwdInput) await confirmPwdInput.fill(password)
-      await this.captureScreenshot()
-      await this.clickNextButton()
-      await this.page.waitForTimeout(2500)
-    }
-
-    // Step 5: Phone Number Verification
-    const telInput = await this.page.$('input[type="tel"], #phoneNumberId')
-    if (telInput && await telInput.isVisible()) {
-      this.updateStep('waiting_phone_number', 'Telefon Numarası Bekleniyor', 'Google doğrulama için telefon numarası istedi.', 40)
-      const phoneNum = await this.waitForUserInput(
-        'phone',
-        'Telefon Numarası Gerekli',
-        'Google hesabını doğrulamak için SMS gönderecek. Lütfen telefon numaranızı girin:',
-        '05XXXXXXXXX'
-      )
-
-      if (phoneNum && this.page && !this.page.isClosed()) {
-        const currentTelInput = await this.page.$('input[type="tel"], #phoneNumberId')
-        if (currentTelInput) {
-          await currentTelInput.fill(phoneNum)
-          await this.captureScreenshot()
-          await this.clickNextButton()
-          await this.page.waitForTimeout(3000)
-        }
-      }
-    }
-
-    // Step 6: SMS Code Verification
-    const smsInput = await this.page.$('input[id="code"], input[name="code"], input[type="tel"]')
-    if (smsInput && await smsInput.isVisible()) {
-      this.updateStep('waiting_sms_code', 'SMS Kodu Bekleniyor', 'Telefonunuza gelen Google doğrulama kodunu girin.', 50)
-      const smsCode = await this.waitForUserInput(
-        'sms',
-        'SMS Doğrulama Kodu',
-        'Telefonunuza gelen G-XXXXXX doğrulama kodunu girin:',
-        'G-123456'
-      )
-
-      if (smsCode && this.page && !this.page.isClosed()) {
-        const cleanCode = smsCode.replace(/\D/g, '')
-        const currentSmsInput = await this.page.$('input[id="code"], input[name="code"], input[type="tel"]')
-        if (currentSmsInput) {
-          await currentSmsInput.fill(cleanCode)
-          await this.captureScreenshot()
-          await this.clickNextButton()
-          await this.page.waitForTimeout(3000)
-        }
-      }
-    }
-
-    // Check for Skip button (Recovery email / phone)
-    const skipBtn = await this.page.$('button:has-text("Atla"), button:has-text("Skip")')
-    if (skipBtn && await skipBtn.isVisible()) {
-      await skipBtn.click()
+    while (this.page && !this.page.isClosed() && stepAttempts < 40) {
+      stepAttempts++
       await this.page.waitForTimeout(2000)
-    }
+      await this.captureScreenshot()
 
-    // Check for Terms Agreement
-    const agreeBtn = await this.page.$('button:has-text("Kabul ediyorum"), button:has-text("I agree")')
-    if (agreeBtn && await agreeBtn.isVisible()) {
-      await agreeBtn.click()
-      await this.page.waitForTimeout(3000)
+      const currentUrl = this.page.url()
+
+      // 1. Name Screen
+      const firstNameInput = await this.page.$('input[name="firstName"], input[id="firstName"]')
+      if (firstNameInput && await firstNameInput.isVisible()) {
+        if (lastHandledStep !== 'name') {
+          lastHandledStep = 'name'
+          this.log('Ad ve Soyad bilgileri giriliyor...', 'info')
+          await firstNameInput.fill(firstName)
+          const lastNameInput = await this.page.$('input[name="lastName"], input[id="lastName"]')
+          if (lastNameInput) await lastNameInput.fill(lastName)
+          await this.captureScreenshot()
+          await this.clickNextButton()
+        }
+        continue
+      }
+
+      // 2. Basic Info (Birthday & Gender)
+      const dayInput = await this.page.$('input[name="day"], #day')
+      if (dayInput && await dayInput.isVisible()) {
+        if (lastHandledStep !== 'birthday') {
+          lastHandledStep = 'birthday'
+          this.log('Doğum tarihi ve cinsiyet bilgileri dolduruluyor...', 'info')
+          await dayInput.fill('15')
+          
+          const yearInput = await this.page.$('input[name="year"], #year')
+          if (yearInput) await yearInput.fill('1995')
+
+          // Month Selection
+          const monthEl = await this.page.$('#month, select[name="month"]')
+          if (monthEl) {
+            try {
+              const isSelect = await monthEl.evaluate((el: any) => el.tagName.toLowerCase() === 'select')
+              if (isSelect) {
+                await monthEl.selectOption('1')
+                  .catch(() => monthEl.selectOption({ index: 1 }))
+                  .catch(() => monthEl.selectOption({ value: '1' }))
+              } else {
+                await monthEl.click()
+                await this.page.waitForTimeout(300)
+                await this.page.keyboard.press('ArrowDown')
+                await this.page.keyboard.press('Enter')
+              }
+            } catch {
+              await monthEl.click().catch(() => {})
+              await this.page.waitForTimeout(300)
+              await this.page.keyboard.press('ArrowDown')
+              await this.page.keyboard.press('Enter')
+            }
+          }
+
+          // Gender Selection
+          const genderEl = await this.page.$('#gender, select[name="gender"]')
+          if (genderEl) {
+            try {
+              const isSelect = await genderEl.evaluate((el: any) => el.tagName.toLowerCase() === 'select')
+              if (isSelect) {
+                await genderEl.selectOption('1')
+                  .catch(() => genderEl.selectOption({ index: 1 }))
+                  .catch(() => genderEl.selectOption({ value: '1' }))
+              } else {
+                await genderEl.click()
+                await this.page.waitForTimeout(300)
+                await this.page.keyboard.press('ArrowDown')
+                await this.page.keyboard.press('Enter')
+              }
+            } catch {
+              await genderEl.click().catch(() => {})
+              await this.page.waitForTimeout(300)
+              await this.page.keyboard.press('ArrowDown')
+              await this.page.keyboard.press('Enter')
+            }
+          }
+
+          await this.captureScreenshot()
+          await this.clickNextButton()
+        }
+        continue
+      }
+
+      // 3. Username Selection / Input
+      const usernameInput = await this.page.$('input[name="Username"], #username')
+      const optionRadio = await this.page.$('input[type="radio"]')
+      if ((usernameInput && await usernameInput.isVisible()) || (optionRadio && await optionRadio.isVisible())) {
+        if (lastHandledStep !== 'username') {
+          lastHandledStep = 'username'
+          if (usernameInput && await usernameInput.isVisible()) {
+            this.log(`Kullanıcı adı giriliyor: ${username}`, 'info')
+            await usernameInput.fill(username)
+          } else if (optionRadio && await optionRadio.isVisible()) {
+            this.log('Önerilen Gmail adresi seçiliyor...', 'info')
+            await optionRadio.click()
+          }
+          await this.captureScreenshot()
+          await this.clickNextButton()
+        }
+        continue
+      }
+
+      // 4. Password Creation
+      const pwdInput = await this.page.$('input[name="Passwd"], input[type="password"]')
+      if (pwdInput && await pwdInput.isVisible()) {
+        if (lastHandledStep !== 'password') {
+          lastHandledStep = 'password'
+          this.log('Şifre belirleniyor...', 'info')
+          await pwdInput.fill(password)
+          const confirmPwdInput = await this.page.$('input[name="ConfirmPasswd"]')
+          if (confirmPwdInput) await confirmPwdInput.fill(password)
+          await this.captureScreenshot()
+          await this.clickNextButton()
+        }
+        continue
+      }
+
+      // 5. Phone Number Verification
+      const telInput = await this.page.$('input[type="tel"], #phoneNumberId')
+      if (telInput && await telInput.isVisible() && !currentUrl.includes('code')) {
+        if (lastHandledStep !== 'phone') {
+          lastHandledStep = 'phone'
+          this.updateStep('waiting_phone_number', 'Telefon Numarası Bekleniyor', 'Google doğrulama için telefon numarası istedi.', 40)
+          const phoneNum = await this.waitForUserInput(
+            'phone',
+            'Telefon Numarası Gerekli',
+            'Google hesabını doğrulamak için SMS gönderecek. Lütfen telefon numaranızı girin:',
+            '05XXXXXXXXX'
+          )
+
+          if (phoneNum && this.page && !this.page.isClosed()) {
+            const currentTelInput = await this.page.$('input[type="tel"], #phoneNumberId')
+            if (currentTelInput) {
+              await currentTelInput.fill(phoneNum)
+              await this.captureScreenshot()
+              await this.clickNextButton()
+            }
+          }
+        }
+        continue
+      }
+
+      // 6. SMS Code Verification
+      const smsInput = await this.page.$('input[id="code"], input[name="code"]')
+      if (smsInput && await smsInput.isVisible()) {
+        if (lastHandledStep !== 'sms') {
+          lastHandledStep = 'sms'
+          this.updateStep('waiting_sms_code', 'SMS Kodu Bekleniyor', 'Telefonunuza gelen Google doğrulama kodunu girin.', 50)
+          const smsCode = await this.waitForUserInput(
+            'sms',
+            'SMS Doğrulama Kodu',
+            'Telefonunuza gelen G-XXXXXX doğrulama kodunu girin:',
+            'G-123456'
+          )
+
+          if (smsCode && this.page && !this.page.isClosed()) {
+            const cleanCode = smsCode.replace(/\D/g, '')
+            const currentSmsInput = await this.page.$('input[id="code"], input[name="code"]')
+            if (currentSmsInput) {
+              await currentSmsInput.fill(cleanCode)
+              await this.captureScreenshot()
+              await this.clickNextButton()
+            }
+          }
+        }
+        continue
+      }
+
+      // 7. Skip button (Recovery email / phone)
+      const skipBtn = await this.page.$('button:has-text("Atla"), button:has-text("Skip")')
+      if (skipBtn && await skipBtn.isVisible()) {
+        await skipBtn.click()
+        await this.page.waitForTimeout(1500)
+        continue
+      }
+
+      // 8. Terms Agreement
+      const agreeBtn = await this.page.$('button:has-text("Kabul ediyorum"), button:has-text("I agree")')
+      if (agreeBtn && await agreeBtn.isVisible()) {
+        await agreeBtn.click()
+        await this.page.waitForTimeout(3000)
+        break
+      }
+
+      // If we landed on myaccount or gemini directly
+      if (currentUrl.includes('myaccount.google.com') || currentUrl.includes('gemini.google.com')) {
+        break
+      }
     }
 
     // Navigate to Gemini Pro Offer
@@ -503,6 +578,7 @@ class PlaywrightWorkerService {
       const newAccount: GeminiAccount = {
         id: `acc_${Date.now()}`,
         email: this.activeState.account.email,
+        password: this.activeState.account.password,
         createdDate: now.toISOString(),
         expiresDate,
         monthlyPayments,

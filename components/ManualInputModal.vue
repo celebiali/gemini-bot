@@ -6,7 +6,13 @@
       </div>
       <div class="flex-1">
         <h4 class="text-lg font-bold text-white mb-1">{{ requiresInput.title }}</h4>
-        <p class="text-sm text-gray-300 mb-4">{{ requiresInput.description }}</p>
+        <p class="text-sm text-gray-300 mb-3">{{ requiresInput.description }}</p>
+
+        <!-- Account Info Badge -->
+        <div v-if="account" class="mb-4 p-3 rounded-xl bg-gray-900/90 border border-purple-500/30 text-xs flex flex-wrap items-center justify-between gap-3 font-mono">
+          <span class="text-purple-200">📧 Mail: <strong class="text-white">{{ account.email }}</strong></span>
+          <span v-if="account.password" class="text-emerald-300">🔑 Şifre: <strong class="text-emerald-200">{{ account.password }}</strong></span>
+        </div>
 
         <form @submit.prevent="handleSubmit" class="flex flex-col sm:flex-row gap-3">
           <input
@@ -49,6 +55,10 @@ const props = defineProps<{
     title: string
     description: string
     placeholder?: string
+  } | null
+  account?: {
+    email: string
+    password?: string
   } | null
 }>()
 

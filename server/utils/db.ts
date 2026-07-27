@@ -12,6 +12,7 @@ export interface MonthlyPaymentSchedule {
 export interface GeminiAccount {
   id: string
   email: string
+  password?: string
   passwordHash?: string
   recoveryEmail?: string
   createdDate: string

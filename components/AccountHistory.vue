@@ -24,12 +24,23 @@
               G
             </div>
             <div>
-              <p class="text-sm font-bold text-white flex items-center gap-2">
+              <p class="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
                 {{ acc.email }}
                 <span v-if="acc.status === 'active'" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                   AKTİF HESAP
                 </span>
               </p>
+              <div v-if="acc.password" class="flex items-center gap-2 mt-1">
+                <span class="text-xs text-purple-300 font-mono bg-purple-950/80 px-2 py-0.5 rounded border border-purple-500/30">
+                  🔑 {{ acc.password }}
+                </span>
+                <button
+                  @click="copyToClipboard(acc.password)"
+                  class="text-[11px] text-gray-400 hover:text-white underline transition"
+                >
+                  Kopyala
+                </button>
+              </div>
               <p class="text-xs text-gray-400 mt-0.5">{{ acc.geminiPlan }} • Kayıt: {{ formatDate(acc.createdDate) }}</p>
             </div>
           </div>
@@ -85,6 +96,7 @@ interface MonthlyPaymentSchedule {
 interface GeminiAccount {
   id: string
   email: string
+  password?: string
   createdDate: string
   expiresDate: string
   monthlyPayments?: MonthlyPaymentSchedule[]
@@ -95,6 +107,12 @@ interface GeminiAccount {
 defineProps<{
   accounts: GeminiAccount[]
 }>()
+
+function copyToClipboard(text: string) {
+  if (navigator?.clipboard) {
+    navigator.clipboard.writeText(text)
+  }
+}
 
 function formatDate(isoStr: string) {
   try {
