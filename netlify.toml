@@ -1,7 +1,11 @@
 [build]
-  command = "npm run build"
-  publish = "dist"
+  command = "npx nuxi generate"
+  publish = ".output/public"
 
 [build.environment]
   NODE_VERSION = "20"
-  NITRO_PRESET = "netlify"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
