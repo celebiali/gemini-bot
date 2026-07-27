@@ -41,6 +41,7 @@ class PlaywrightWorkerService {
   private page: any = null
   private activeState: AutomationState = this.getInitialState()
   private screenshotInterval: NodeJS.Timeout | null = null
+  private pendingInputResolver: ((value: string) => void) | null = null
 
   private getTurkeyTimeString(): string {
     return new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' })
@@ -88,10 +89,10 @@ class PlaywrightWorkerService {
   public async captureScreenshot() {
     if (this.page && !this.page.isClosed()) {
       try {
-        const buffer = await this.page.screenshot({ type: 'jpeg', quality: 60 })
+        const buffer = await this.page.screenshot({ type: 'jpeg', quality: 65 })
         this.activeState.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`
       } catch (err) {
-        // Screenshot capture failed gracefully
+        // Screenshot capture handled gracefully
       }
     }
   }
@@ -100,7 +101,7 @@ class PlaywrightWorkerService {
     if (this.screenshotInterval) clearInterval(this.screenshotInterval)
     this.screenshotInterval = setInterval(() => {
       this.captureScreenshot()
-    }, 1500)
+    }, 1200)
   }
 
   private stopScreenshotStreaming() {
@@ -110,48 +111,63 @@ class PlaywrightWorkerService {
     }
   }
 
+  private waitForUserInput(
+    type: 'phone' | 'sms' | 'payment_confirm' | 'manual_action',
+    title: string,
+    description: string,
+    placeholder?: string
+  ): Promise<string> {
+    this.activeState.requiresInput = { type, title, description, placeholder }
+    return new Promise((resolve) => {
+      this.pendingInputResolver = resolve
+    })
+  }
+
   public async submitInput(input: string) {
-    if (!this.activeState.requiresInput) return { success: false, message: 'Bekleyen bir girdi isteği yok.' }
+    if (this.pendingInputResolver) {
+      const resolver = this.pendingInputResolver
+      this.pendingInputResolver = null
+      const inputType = this.activeState.requiresInput?.type
+      this.log(`Kullanıcı girdisi işleniyor (${inputType}): ${input ? input.replace(/./g, '*') : 'Devam'}`, 'info')
+      this.activeState.requiresInput = null
+      resolver(input)
+      await this.captureScreenshot()
+      return { success: true }
+    }
 
-    const inputType = this.activeState.requiresInput.type
-    this.log(`Kullanıcı girdisi alındı (${inputType}): ${input.replace(/./g, '*')}`, 'info')
-    this.activeState.requiresInput = null
-
-    if (this.page && !this.page.isClosed()) {
-      try {
-        if (inputType === 'phone') {
-          await this.page.fill('input[type="tel"]', input)
-          await this.page.keyboard.press('Enter')
-          this.updateStep('waiting_sms_code', 'SMS Kodu Bekleniyor', 'Telefonunuza gelen Google doğrulama kodunu girin.', 40)
-          this.activeState.requiresInput = {
-            type: 'sms',
-            title: 'SMS Doğrulama Kodu',
-            description: 'Telefonunuza gelen G-XXXXXX kodunu girin:',
-            placeholder: 'G-123456',
-          }
-        } else if (inputType === 'sms') {
-          const cleanCode = input.replace(/\D/g, '')
-          await this.page.fill('input[name="code"], input[type="text"]', cleanCode)
-          await this.page.keyboard.press('Enter')
-          this.log('SMS kodu gönderildi, hesap kurulumu devam ediyor...', 'success')
-        } else if (inputType === 'payment_confirm') {
-          this.log('1. Ay Ödemesi & 3DS SMS Onaylandı. Gemini Pro aboneliği aktifleştiriliyor...', 'success')
-          await this.processAfterPayment()
-        }
-        await this.captureScreenshot()
-        return { success: true }
-      } catch (err: any) {
-        this.log(`Girdi işlenirken hata oluştu: ${err?.message || err}`, 'error')
-        return { success: false, error: err?.message }
-      }
-    } else {
-      if (inputType === 'payment_confirm') {
-        this.log('1. Ay Ödemesi & 3DS SMS Onaylandı. Gemini Pro aboneliği aktifleştiriliyor...', 'success')
-        await this.processAfterPayment()
-      }
+    if (!this.activeState.requiresInput) {
+      return { success: false, message: 'Bekleyen bir girdi isteği yok.' }
     }
 
     return { success: true }
+  }
+
+  private async clickNextButton() {
+    if (!this.page || this.page.isClosed()) return
+    try {
+      const nextSelectors = [
+        'button:has-text("İleri")',
+        'button:has-text("Next")',
+        'button:has-text("Kabul ediyorum")',
+        'button:has-text("I agree")',
+        'button:has-text("Atla")',
+        'button:has-text("Skip")',
+        '#next',
+        'button[type="button"]:has-text("İleri")',
+        'button[type="submit"]',
+      ]
+
+      for (const selector of nextSelectors) {
+        const btn = await this.page.$(selector)
+        if (btn && await btn.isVisible()) {
+          await btn.click()
+          return
+        }
+      }
+      await this.page.keyboard.press('Enter')
+    } catch (err) {
+      await this.page.keyboard.press('Enter')
+    }
   }
 
   public async startAutomation(options?: { customEmail?: string; headless?: boolean }) {
@@ -175,106 +191,221 @@ class PlaywrightWorkerService {
     this.activeState.account = { email, password, firstName, lastName }
     this.log(`Yeni Oluşturulacak Mail: ${email}`, 'success')
 
-    // 2. Launch browser via dynamic import
-    try {
-      this.updateStep('launching_browser', 'Tarayıcı Başlatılıyor', 'Playwright Chromium tarayıcısı açılıyor.', 20)
-      
-      let chromium: any = null
-      try {
-        const pw = await import('playwright')
-        chromium = pw.chromium
-      } catch (pwErr) {
-        this.log('Playwright modülü yüklenemedi.', 'warn')
-      }
-
-      if (chromium) {
-        try {
-          this.browser = await chromium.launch({
-            headless: options?.headless ?? false,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--lang=tr-TR,tr'],
-          })
-        } catch (launchErr: any) {
-          this.log('Vercel/Serverless ortamda Chrome ikili dosyaları varsayılan olarak bulunmuyor.', 'warn')
-          this.log('Bilgisayarınızda veya Docker sunucuda çalıştığınızda canlı Chromium tarayıcısı açılacaktır.', 'info')
-        }
-      }
-
-      if (!this.browser) {
-        // Fallback flow for serverless environments without Chrome binary
-        this.log('Hesap ve kampanya adımları simülasyon modunda hazırlanıyor...', 'info')
-        await new Promise(r => setTimeout(r, 1500))
-        this.updateStep('navigating_gemini_offer', 'Gemini Pro Kampanyasına Gidiliyor', 'Gemini Advanced / Google One indirim teklifi hazırlanıyor.', 60)
-        this.updateStep('waiting_payment_checkout', '1. Ay Ödemesi & 3DS SMS Onayı Bekleniyor', 'Lütfen 1. Ay ödemeniz için kart bilgilerinizi girip SMS onayını tamamlayın.', 85)
-        this.activeState.requiresInput = {
-          type: 'payment_confirm',
-          title: '1. Ay İndirimli Ödeme ve 3D Secure SMS Onayı',
-          description: '1. Ay ödemesi için kart bilgilerinizi girip SMS onay şifresini onayladıktan sonra aşağıdaki butona tıklayın:',
-        }
-        return { success: true, sessionId: this.activeState.id }
-      }
-
-      const context = await this.browser.newContext({
-        viewport: { width: 1280, height: 800 },
-        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        locale: 'tr-TR',
-      })
-
-      this.page = await context.newPage()
-      this.startScreenshotStreaming()
-
-      this.updateStep('creating_google_account', 'Google Kayıt Sayfası Açılıyor', 'Google yeni hesap oluşturma ekranına gidiliyor.', 30)
-      await this.page.goto('https://accounts.google.com/signup', { waitUntil: 'domcontentloaded' })
-      await this.captureScreenshot()
-
-      await this.page.waitForTimeout(2000)
-
-      const nameInput = await this.page.$('input[name="firstName"]')
-      if (nameInput) {
-        await nameInput.fill(firstName)
-        const lastNameInput = await this.page.$('input[name="lastName"]')
-        if (lastNameInput) await lastNameInput.fill(lastName)
-        await this.page.keyboard.press('Enter')
-        await this.page.waitForTimeout(2000)
-      }
-
-      const phoneInput = await this.page.$('input[type="tel"]')
-      if (phoneInput) {
-        this.updateStep('waiting_phone_number', 'Telefon Numarası Bekleniyor', 'Google doğrulama için telefon numarası istedi.', 35)
-        this.activeState.requiresInput = {
-          type: 'phone',
-          title: 'Telefon Numarası Gerekli',
-          description: 'Google doğrulama SMS göndermek için telefon numarası istiyor. Lütfen telefon numaranızı girin:',
-          placeholder: '05XXXXXXXXX',
-        }
-      } else {
-        this.log('Kayıt adımları devam ediyor. Gemini Pro kampanya sayfasına yönlendirilecek.', 'info')
-        await this.navigateToGeminiOffer()
-      }
-
-      return { success: true, sessionId: this.activeState.id }
-    } catch (err: any) {
-      this.updateStep('error', 'Hata Oluştu', err?.message || 'Bilinmeyen otomasyon hatası.', 0)
+    // Start background execution flow asynchronously
+    this.runAutomationLoop(firstName, lastName, username, password, options?.headless ?? false).catch((err) => {
+      this.updateStep('error', 'Hata Oluştu', err?.message || 'Otomasyon hatası.', 0)
       this.activeState.errorMessage = err?.message
-      return { success: false, error: err?.message }
+    })
+
+    return { success: true, sessionId: this.activeState.id }
+  }
+
+  private async runAutomationLoop(
+    firstName: string,
+    lastName: string,
+    username: string,
+    password: string,
+    headless: boolean
+  ) {
+    this.updateStep('launching_browser', 'Tarayıcı Başlatılıyor', 'Playwright Chromium tarayıcısı açılıyor.', 20)
+    
+    let chromium: any = null
+    try {
+      const pw = await import('playwright')
+      chromium = pw.chromium
+    } catch (pwErr) {
+      this.log('Playwright modülü yüklenemedi.', 'warn')
     }
+
+    if (chromium) {
+      try {
+        this.browser = await chromium.launch({
+          headless,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--lang=tr-TR,tr'],
+        })
+      } catch (launchErr: any) {
+        this.log('Yerel Chrome ikili dosyaları açılamadı, simülasyon moduna geçiliyor.', 'warn')
+      }
+    }
+
+    if (!this.browser) {
+      // Fallback flow for serverless / no-browser environments
+      this.log('Hesap ve kampanya adımları simülasyon modunda hazırlanıyor...', 'info')
+      await new Promise(r => setTimeout(r, 1500))
+      this.updateStep('navigating_gemini_offer', 'Gemini Pro Kampanyasına Gidiliyor', 'Gemini Advanced / Google One indirim teklifi hazırlanıyor.', 60)
+      this.updateStep('waiting_payment_checkout', '1. Ay Ödemesi & 3DS SMS Onayı Bekleniyor', 'Lütfen 1. Ay ödemeniz için kart bilgilerinizi girip SMS onayını tamamlayın.', 85)
+      await this.waitForUserInput(
+        'payment_confirm',
+        '1. Ay İndirimli Ödeme ve 3D Secure SMS Onayı',
+        '1. Ay ödemesi için kart bilgilerinizi girip SMS onay şifresini onayladıktan sonra aşağıdaki butona tıklayın:'
+      )
+      await this.processAfterPayment()
+      return
+    }
+
+    const context = await this.browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      locale: 'tr-TR',
+    })
+
+    this.page = await context.newPage()
+    this.startScreenshotStreaming()
+
+    // Step 1: Google Signup page
+    this.updateStep('creating_google_account', 'Google Kayıt Sayfası Açılıyor', 'Google yeni hesap oluşturma ekranına gidiliyor.', 30)
+    await this.page.goto('https://accounts.google.com/signup', { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await this.captureScreenshot()
+    await this.page.waitForTimeout(2000)
+
+    // Name Screen
+    const nameInput = await this.page.$('input[name="firstName"], input[id="firstName"]')
+    if (nameInput) {
+      this.log('Ad ve Soyad bilgileri giriliyor...', 'info')
+      await nameInput.fill(firstName)
+      const lastNameInput = await this.page.$('input[name="lastName"], input[id="lastName"]')
+      if (lastNameInput) await lastNameInput.fill(lastName)
+      await this.captureScreenshot()
+      await this.clickNextButton()
+      await this.page.waitForTimeout(2500)
+    }
+
+    // Step 2: Basic Info (Birthday & Gender)
+    const dayInput = await this.page.$('input[name="day"], #day')
+    if (dayInput) {
+      this.log('Doğum tarihi ve cinsiyet bilgileri dolduruluyor...', 'info')
+      await dayInput.fill('15')
+      
+      const yearInput = await this.page.$('input[name="year"], #year')
+      if (yearInput) await yearInput.fill('1995')
+
+      const monthSelect = await this.page.$('select[name="month"], #month')
+      if (monthSelect) {
+        await monthSelect.selectOption({ index: 1 }).catch(async () => {
+          await monthSelect.selectOption({ value: '1' }).catch(() => {})
+        })
+      }
+
+      const genderSelect = await this.page.$('select[name="gender"], #gender')
+      if (genderSelect) {
+        await genderSelect.selectOption({ index: 1 }).catch(async () => {
+          await genderSelect.selectOption({ value: '1' }).catch(() => {})
+        })
+      }
+
+      await this.captureScreenshot()
+      await this.clickNextButton()
+      await this.page.waitForTimeout(2500)
+    }
+
+    // Step 3: Username Screen
+    const usernameInput = await this.page.$('input[name="Username"], #username')
+    const optionRadio = await this.page.$('input[type="radio"]')
+
+    if (usernameInput && await usernameInput.isVisible()) {
+      this.log(`Kullanıcı adı giriliyor: ${username}`, 'info')
+      await usernameInput.fill(username)
+      await this.clickNextButton()
+      await this.page.waitForTimeout(2500)
+    } else if (optionRadio) {
+      this.log('Önerilen Gmail adresi seçiliyor...', 'info')
+      await optionRadio.click()
+      await this.clickNextButton()
+      await this.page.waitForTimeout(2500)
+    }
+
+    // Step 4: Password Creation
+    const pwdInput = await this.page.$('input[name="Passwd"], input[type="password"]')
+    if (pwdInput && await pwdInput.isVisible()) {
+      this.log('Şifre belirleniyor...', 'info')
+      await pwdInput.fill(password)
+      const confirmPwdInput = await this.page.$('input[name="ConfirmPasswd"]')
+      if (confirmPwdInput) await confirmPwdInput.fill(password)
+      await this.captureScreenshot()
+      await this.clickNextButton()
+      await this.page.waitForTimeout(2500)
+    }
+
+    // Step 5: Phone Number Verification
+    const telInput = await this.page.$('input[type="tel"], #phoneNumberId')
+    if (telInput && await telInput.isVisible()) {
+      this.updateStep('waiting_phone_number', 'Telefon Numarası Bekleniyor', 'Google doğrulama için telefon numarası istedi.', 40)
+      const phoneNum = await this.waitForUserInput(
+        'phone',
+        'Telefon Numarası Gerekli',
+        'Google hesabını doğrulamak için SMS gönderecek. Lütfen telefon numaranızı girin:',
+        '05XXXXXXXXX'
+      )
+
+      if (phoneNum && this.page && !this.page.isClosed()) {
+        const currentTelInput = await this.page.$('input[type="tel"], #phoneNumberId')
+        if (currentTelInput) {
+          await currentTelInput.fill(phoneNum)
+          await this.captureScreenshot()
+          await this.clickNextButton()
+          await this.page.waitForTimeout(3000)
+        }
+      }
+    }
+
+    // Step 6: SMS Code Verification
+    const smsInput = await this.page.$('input[id="code"], input[name="code"], input[type="tel"]')
+    if (smsInput && await smsInput.isVisible()) {
+      this.updateStep('waiting_sms_code', 'SMS Kodu Bekleniyor', 'Telefonunuza gelen Google doğrulama kodunu girin.', 50)
+      const smsCode = await this.waitForUserInput(
+        'sms',
+        'SMS Doğrulama Kodu',
+        'Telefonunuza gelen G-XXXXXX doğrulama kodunu girin:',
+        'G-123456'
+      )
+
+      if (smsCode && this.page && !this.page.isClosed()) {
+        const cleanCode = smsCode.replace(/\D/g, '')
+        const currentSmsInput = await this.page.$('input[id="code"], input[name="code"], input[type="tel"]')
+        if (currentSmsInput) {
+          await currentSmsInput.fill(cleanCode)
+          await this.captureScreenshot()
+          await this.clickNextButton()
+          await this.page.waitForTimeout(3000)
+        }
+      }
+    }
+
+    // Check for Skip button (Recovery email / phone)
+    const skipBtn = await this.page.$('button:has-text("Atla"), button:has-text("Skip")')
+    if (skipBtn && await skipBtn.isVisible()) {
+      await skipBtn.click()
+      await this.page.waitForTimeout(2000)
+    }
+
+    // Check for Terms Agreement
+    const agreeBtn = await this.page.$('button:has-text("Kabul ediyorum"), button:has-text("I agree")')
+    if (agreeBtn && await agreeBtn.isVisible()) {
+      await agreeBtn.click()
+      await this.page.waitForTimeout(3000)
+    }
+
+    // Navigate to Gemini Pro Offer
+    await this.navigateToGeminiOffer()
   }
 
   public async navigateToGeminiOffer() {
-    if (!this.page) return
+    if (!this.page || this.page.isClosed()) return
     try {
-      this.updateStep('navigating_gemini_offer', 'Gemini Pro Kampanyasına Gidiliyor', 'Gemini Advanced / Google One indirim teklifi açılıyor.', 60)
-      await this.page.goto('https://gemini.google.com/advanced', { waitUntil: 'domcontentloaded' })
+      this.updateStep('navigating_gemini_offer', 'Gemini Pro Kampanyasına Gidiliyor', 'Gemini Advanced / Google One indirim teklifi açılıyor.', 70)
+      await this.page.goto('https://gemini.google.com/advanced', { waitUntil: 'domcontentloaded', timeout: 30000 })
       await this.page.waitForTimeout(3000)
       await this.captureScreenshot()
 
       this.updateStep('waiting_payment_checkout', '1. Ay Ödemesi & 3DS SMS Onayı Bekleniyor', 'Lütfen 1. Ay ödemeniz için kart bilgilerinizi girip SMS onayını tamamlayın.', 85)
-      this.activeState.requiresInput = {
-        type: 'payment_confirm',
-        title: '1. Ay İndirimli Ödeme ve 3D Secure SMS Onayı',
-        description: '1. Ay ödemesi için kart bilgilerinizi girip SMS onay şifresini onayladıktan sonra aşağıdaki butona tıklayın:',
-      }
+      await this.waitForUserInput(
+        'payment_confirm',
+        '1. Ay İndirimli Ödeme ve 3D Secure SMS Onayı',
+        '1. Ay ödemesi için kart bilgilerinizi girip SMS onay şifresini onayladıktan sonra aşağıdaki butona tıklayın:'
+      )
+      await this.processAfterPayment()
     } catch (err: any) {
-      this.log(`Gemini teklif sayfasına gidilirken hata: ${err?.message}`, 'warn')
+      this.log(`Gemini teklif sayfasına gidilirken uyarı: ${err?.message}`, 'warn')
     }
   }
 
@@ -325,6 +456,9 @@ class PlaywrightWorkerService {
 
   public async stopAutomation() {
     this.stopScreenshotStreaming()
+    if (this.pendingInputResolver) {
+      this.pendingInputResolver = null
+    }
     if (this.browser) {
       try {
         await this.browser.close()
@@ -338,3 +472,4 @@ class PlaywrightWorkerService {
 }
 
 export const playwrightWorker = new PlaywrightWorkerService()
+

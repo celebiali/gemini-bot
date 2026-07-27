@@ -10,11 +10,11 @@
 
         <form @submit.prevent="handleSubmit" class="flex flex-col sm:flex-row gap-3">
           <input
-            v-if="requiresInput.type !== 'payment_confirm'"
+            v-if="requiresInput.type !== 'payment_confirm' && requiresInput.type !== 'manual_action'"
             v-model="inputValue"
             type="text"
             :placeholder="requiresInput.placeholder || 'Girdi girin...'"
-            required
+            :required="requiresInput.type === 'phone' || requiresInput.type === 'sms'"
             class="flex-1 bg-gray-900/90 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition"
           />
 
@@ -24,7 +24,15 @@
             class="px-6 py-2.5 rounded-xl gradient-bg hover:opacity-90 font-semibold text-sm text-white shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50"
           >
             <span v-if="loading" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-            <span>{{ requiresInput.type === 'payment_confirm' ? 'Ödeme ve SMS Tamamlandı, Devam Et' : 'Gönder ve İlerle' }}</span>
+            <span>
+              {{
+                requiresInput.type === 'payment_confirm'
+                  ? 'Ödeme ve SMS Tamamlandı, Devam Et'
+                  : requiresInput.type === 'manual_action'
+                  ? 'İşlem Tamamlandı, İlerle'
+                  : 'Gönder ve İlerle'
+              }}
+            </span>
           </button>
         </form>
       </div>
