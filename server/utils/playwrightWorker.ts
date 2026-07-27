@@ -1,3 +1,6 @@
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { saveAccount, type GeminiAccount, type MonthlyPaymentSchedule } from './db'
 
 export interface AutomationState {
@@ -34,7 +37,11 @@ export interface AutomationState {
     placeholder?: string
   } | null
   errorMessage?: string
+  updatedAt?: number
 }
+
+const STATE_FILE = join(tmpdir(), 'gemini_automation_state.json')
+const INPUT_FILE = join(tmpdir(), 'gemini_pending_input.json')
 
 class PlaywrightWorkerService {
   private browser: any = null
@@ -58,10 +65,41 @@ class PlaywrightWorkerService {
       screenshot: null,
       account: null,
       requiresInput: null,
+      updatedAt: Date.now(),
     }
   }
 
+  private saveStateToFile() {
+    try {
+      this.activeState.updatedAt = Date.now()
+      writeFileSync(STATE_FILE, JSON.stringify(this.activeState), 'utf-8')
+    } catch {}
+  }
+
+  private loadStateFromFile(): AutomationState | null {
+    try {
+      if (existsSync(STATE_FILE)) {
+        const raw = readFileSync(STATE_FILE, 'utf-8')
+        const parsed = JSON.parse(raw) as AutomationState
+        // Check if state is fresh (less than 15 minutes old)
+        if (parsed && parsed.updatedAt && Date.now() - parsed.updatedAt < 15 * 60 * 1000) {
+          return parsed
+        }
+      }
+    } catch {}
+    return null
+  }
+
   public getState(): AutomationState {
+    const fileState = this.loadStateFromFile()
+    if (fileState) {
+      // Prefer file state if memory state is idle or older
+      if (this.activeState.step === 'idle' && fileState.step !== 'idle') {
+        this.activeState = fileState
+      } else if (fileState.updatedAt && this.activeState.updatedAt && fileState.updatedAt > this.activeState.updatedAt) {
+        this.activeState = fileState
+      }
+    }
     return this.activeState
   }
 
@@ -71,6 +109,7 @@ class PlaywrightWorkerService {
     if (this.activeState.logs.length > 100) {
       this.activeState.logs.pop()
     }
+    this.saveStateToFile()
   }
 
   private updateStep(
@@ -84,6 +123,7 @@ class PlaywrightWorkerService {
     this.activeState.stepDescription = description
     this.activeState.progressPercent = progress
     this.log(`[${title}] ${description}`, step === 'error' ? 'error' : 'info')
+    this.saveStateToFile()
   }
 
   public async captureScreenshot() {
@@ -91,6 +131,7 @@ class PlaywrightWorkerService {
       try {
         const buffer = await this.page.screenshot({ type: 'jpeg', quality: 65 })
         this.activeState.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`
+        this.saveStateToFile()
       } catch (err) {
         // Screenshot capture handled gracefully
       }
@@ -118,25 +159,59 @@ class PlaywrightWorkerService {
     placeholder?: string
   ): Promise<string> {
     this.activeState.requiresInput = { type, title, description, placeholder }
+    this.saveStateToFile()
+
+    // Clean any stale input file
+    try {
+      if (existsSync(INPUT_FILE)) unlinkSync(INPUT_FILE)
+    } catch {}
+
     return new Promise((resolve) => {
       this.pendingInputResolver = resolve
+
+      // Poll file system for input in case input POST landed on a different serverless instance
+      const checkInterval = setInterval(() => {
+        try {
+          if (existsSync(INPUT_FILE)) {
+            const val = readFileSync(INPUT_FILE, 'utf-8')
+            unlinkSync(INPUT_FILE)
+            clearInterval(checkInterval)
+            if (this.pendingInputResolver) {
+              this.pendingInputResolver = null
+              this.activeState.requiresInput = null
+              this.saveStateToFile()
+              resolve(val)
+            }
+          }
+        } catch {}
+      }, 500)
     })
   }
 
   public async submitInput(input: string) {
+    // Write input to file for cross-instance serverless communication
+    try {
+      writeFileSync(INPUT_FILE, input, 'utf-8')
+    } catch {}
+
     if (this.pendingInputResolver) {
       const resolver = this.pendingInputResolver
       this.pendingInputResolver = null
       const inputType = this.activeState.requiresInput?.type
       this.log(`Kullanıcı girdisi işleniyor (${inputType}): ${input ? input.replace(/./g, '*') : 'Devam'}`, 'info')
       this.activeState.requiresInput = null
+      this.saveStateToFile()
       resolver(input)
       await this.captureScreenshot()
       return { success: true }
     }
 
-    if (!this.activeState.requiresInput) {
-      return { success: false, message: 'Bekleyen bir girdi isteği yok.' }
+    const currentReq = this.activeState.requiresInput
+    if (currentReq) {
+      this.log(`Kullanıcı girdisi alındı (${currentReq.type}): ${input ? input.replace(/./g, '*') : 'Devam'}`, 'info')
+      this.activeState.requiresInput = null
+      this.saveStateToFile()
+      return { success: true }
     }
 
     return { success: true }

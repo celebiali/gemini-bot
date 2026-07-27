@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'os'
 
 export interface MonthlyPaymentSchedule {
   month: number // 1, 2, 3
@@ -23,16 +24,29 @@ export interface GeminiAccount {
   notes?: string
 }
 
-const DB_PATH = join(process.cwd(), 'data', 'accounts.json')
+function getDbPath(): string {
+  try {
+    const defaultDir = join(process.cwd(), 'data')
+    if (!existsSync(defaultDir)) {
+      mkdirSync(defaultDir, { recursive: true })
+    }
+    return join(defaultDir, 'accounts.json')
+  } catch {
+    // Fallback to /tmp on serverless environments like Vercel
+    const tmpDir = tmpdir()
+    return join(tmpDir, 'gemini_accounts.json')
+  }
+}
+
+const DB_PATH = getDbPath()
 
 function ensureDbExists() {
-  const dir = join(process.cwd(), 'data')
-  if (!existsSync(dir)) {
-    const fs = require('fs')
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  if (!existsSync(DB_PATH)) {
-    writeFileSync(DB_PATH, JSON.stringify([], null, 2), 'utf-8')
+  try {
+    if (!existsSync(DB_PATH)) {
+      writeFileSync(DB_PATH, JSON.stringify([], null, 2), 'utf-8')
+    }
+  } catch {
+    // Graceful error handling
   }
 }
 
@@ -55,7 +69,11 @@ export function saveAccount(account: GeminiAccount): GeminiAccount {
     accounts.unshift(account)
   }
   ensureDbExists()
-  writeFileSync(DB_PATH, JSON.stringify(accounts, null, 2), 'utf-8')
+  try {
+    writeFileSync(DB_PATH, JSON.stringify(accounts, null, 2), 'utf-8')
+  } catch {
+    // Graceful write handling
+  }
   return account
 }
 
@@ -63,3 +81,4 @@ export function getActiveAccount(): GeminiAccount | null {
   const accounts = getAccounts()
   return accounts.find(a => a.status === 'active') || accounts[0] || null
 }
+
