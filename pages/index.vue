@@ -32,10 +32,10 @@
       @stop="stopAutomation"
     />
 
-    <!-- Interactive Prompt Action Station (SMS / Phone / Payment) -->
+    <!-- Interactive Input Control Station -->
     <div
-      v-if="automationState.requiresInput || automationState.step === 'waiting_phone_number' || automationState.step === 'waiting_sms_code'"
-      class="glass-panel p-6 border-2 border-purple-500/50 shadow-glow animate-pulse-glow"
+      v-if="automationState.step !== 'idle' && automationState.step !== 'completed'"
+      class="glass-panel p-6 border-2 border-purple-500/60 shadow-glow mb-6"
     >
       <div class="flex items-start gap-4">
         <div class="w-12 h-12 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400 flex items-center justify-center shrink-0 text-xl font-bold">
@@ -43,40 +43,38 @@
         </div>
         <div class="flex-1">
           <h4 class="text-lg font-bold text-white mb-1">
-            {{ automationState.requiresInput?.title || (automationState.step === 'waiting_phone_number' ? 'Telefon Numarası Gerekli' : 'SMS Doğrulama Kodu Gerekli') }}
+            {{ automationState.requiresInput?.title || (automationState.step === 'waiting_sms_code' ? 'SMS Doğrulama Kodu' : 'Telefon Numarası Doğrulaması') }}
           </h4>
           <p class="text-sm text-gray-300 mb-3">
-            {{ automationState.requiresInput?.description || 'Google doğrulaması için bilgiyi girip onaylayın:' }}
+            {{ automationState.requiresInput?.description || 'Google doğrulaması için telefon numaranızı (05XXXXXXXXX) veya gelen SMS kodunu buraya yazıp gönderin:' }}
           </p>
 
+          <!-- Account Info Badge -->
           <div v-if="automationState.account" class="mb-4 p-3 rounded-xl bg-gray-900/90 border border-purple-500/30 text-xs flex flex-wrap items-center justify-between gap-3 font-mono">
-            <span class="text-purple-200">📧 Mail: <strong class="text-white">{{ automationState.account.email }}</strong></span>
-            <span v-if="automationState.account.password" class="text-emerald-300">🔑 Şifre: <strong class="text-emerald-200">{{ automationState.account.password }}</strong></span>
+            <span class="text-purple-200">📧 Açılan Mail: <strong class="text-white">{{ automationState.account.email }}</strong></span>
+            <span v-if="automationState.account.password" class="text-emerald-300">🔑 Şifreniz: <strong class="text-emerald-200">{{ automationState.account.password }}</strong></span>
           </div>
 
           <form @submit.prevent="submitDirectInput" class="flex flex-col sm:flex-row gap-3">
             <input
-              v-if="automationState.requiresInput?.type !== 'payment_confirm' && automationState.requiresInput?.type !== 'manual_action'"
               v-model="directInputValue"
               type="text"
-              :placeholder="automationState.step === 'waiting_phone_number' ? '05XXXXXXXXX' : (automationState.requiresInput?.placeholder || 'Girdi girin...')"
+              :placeholder="automationState.step === 'waiting_sms_code' ? 'SMS Kodu (Örn: G-123456)' : 'Telefon Numarası (Örn: 05XXXXXXXXX)'"
               required
-              class="flex-1 bg-gray-900/90 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition"
+              class="flex-1 bg-gray-950/90 border-2 border-purple-500/50 rounded-xl px-4 py-3 text-base font-medium text-white placeholder-gray-400 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500 transition shadow-inner"
             />
 
             <button
               type="submit"
               :disabled="inputSubmitting"
-              class="px-6 py-2.5 rounded-xl gradient-bg hover:opacity-90 font-semibold text-sm text-white shadow-lg flex items-center justify-center gap-2 transition disabled:opacity-50"
+              class="px-8 py-3 rounded-xl gradient-bg hover:opacity-90 font-bold text-sm text-white shadow-glow flex items-center justify-center gap-2 transition disabled:opacity-50 shrink-0"
             >
               <span v-if="inputSubmitting" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
               <span>
                 {{
                   automationState.requiresInput?.type === 'payment_confirm'
-                    ? 'Ödeme ve SMS Tamamlandı, Devam Et'
-                    : automationState.requiresInput?.type === 'manual_action'
-                    ? 'İşlem Tamamlandı, İlerle'
-                    : 'Gönder ve İlerle'
+                    ? 'Ödeme & SMS Tamamlandı, Devam Et'
+                    : 'Gönder ve İlerle ➔'
                 }}
               </span>
             </button>
