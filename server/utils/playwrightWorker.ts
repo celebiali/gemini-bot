@@ -204,6 +204,7 @@ class PlaywrightWorkerService {
       return { success: true }
     }
 
+    const currentReq = this.activeState.requiresInput
     if (currentReq) {
       this.log(`Kullanıcı girdisi alındı (${currentReq.type}): ${input ? input.replace(/./g, '*') : 'Devam'}`, 'info')
       if (currentReq.type === 'payment_confirm') {
