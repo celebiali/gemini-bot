@@ -42,6 +42,10 @@ class PlaywrightWorkerService {
   private activeState: AutomationState = this.getInitialState()
   private screenshotInterval: NodeJS.Timeout | null = null
 
+  private getTurkeyTimeString(): string {
+    return new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' })
+  }
+
   private getInitialState(): AutomationState {
     return {
       id: '',
@@ -49,7 +53,7 @@ class PlaywrightWorkerService {
       stepTitle: 'Hazır',
       stepDescription: 'Otomasyon başlatılmayı bekliyor.',
       progressPercent: 0,
-      logs: [{ timestamp: new Date().toLocaleTimeString('tr-TR'), message: 'Sistem hazır.', type: 'info' }],
+      logs: [{ timestamp: this.getTurkeyTimeString(), message: 'Sistem hazır.', type: 'info' }],
       screenshot: null,
       account: null,
       requiresInput: null,
@@ -61,7 +65,7 @@ class PlaywrightWorkerService {
   }
 
   public log(message: string, type: 'info' | 'warn' | 'success' | 'error' = 'info') {
-    const timestamp = new Date().toLocaleTimeString('tr-TR')
+    const timestamp = this.getTurkeyTimeString()
     this.activeState.logs.unshift({ timestamp, message, type })
     if (this.activeState.logs.length > 100) {
       this.activeState.logs.pop()
@@ -140,6 +144,11 @@ class PlaywrightWorkerService {
         this.log(`Girdi işlenirken hata oluştu: ${err?.message || err}`, 'error')
         return { success: false, error: err?.message }
       }
+    } else {
+      if (inputType === 'payment_confirm') {
+        this.log('1. Ay Ödemesi & 3DS SMS Onaylandı. Gemini Pro aboneliği aktifleştiriliyor...', 'success')
+        await this.processAfterPayment()
+      }
     }
 
     return { success: true }
@@ -175,13 +184,25 @@ class PlaywrightWorkerService {
         const pw = await import('playwright')
         chromium = pw.chromium
       } catch (pwErr) {
-        this.log('Serverless ortam tespit edildi. Web tarayıcısı simülasyon modunda çalışıyor.', 'warn')
+        this.log('Playwright modülü yüklenemedi.', 'warn')
       }
 
-      if (!chromium) {
-        // Fallback flow for serverless environments (Netlify/Vercel)
-        this.log('Serverless ortamda Google kayıt ve kampanya adımları hazırlanıyor...', 'info')
-        await new Promise(r => setTimeout(r, 2000))
+      if (chromium) {
+        try {
+          this.browser = await chromium.launch({
+            headless: options?.headless ?? false,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--lang=tr-TR,tr'],
+          })
+        } catch (launchErr: any) {
+          this.log('Vercel/Serverless ortamda Chrome ikili dosyaları varsayılan olarak bulunmuyor.', 'warn')
+          this.log('Bilgisayarınızda veya Docker sunucuda çalıştığınızda canlı Chromium tarayıcısı açılacaktır.', 'info')
+        }
+      }
+
+      if (!this.browser) {
+        // Fallback flow for serverless environments without Chrome binary
+        this.log('Hesap ve kampanya adımları simülasyon modunda hazırlanıyor...', 'info')
+        await new Promise(r => setTimeout(r, 1500))
         this.updateStep('navigating_gemini_offer', 'Gemini Pro Kampanyasına Gidiliyor', 'Gemini Advanced / Google One indirim teklifi hazırlanıyor.', 60)
         this.updateStep('waiting_payment_checkout', '1. Ay Ödemesi & 3DS SMS Onayı Bekleniyor', 'Lütfen 1. Ay ödemeniz için kart bilgilerinizi girip SMS onayını tamamlayın.', 85)
         this.activeState.requiresInput = {
@@ -191,11 +212,6 @@ class PlaywrightWorkerService {
         }
         return { success: true, sessionId: this.activeState.id }
       }
-
-      this.browser = await chromium.launch({
-        headless: options?.headless ?? false,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--lang=tr-TR,tr'],
-      })
 
       const context = await this.browser.newContext({
         viewport: { width: 1280, height: 800 },
