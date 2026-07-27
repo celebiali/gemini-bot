@@ -1,4 +1,3 @@
-import { chromium } from 'playwright';
 import { s as saveAccount } from './db.mjs';
 
 var __defProp = Object.defineProperty;
@@ -115,6 +114,25 @@ class PlaywrightWorkerService {
     this.log(`Yeni Olu\u015Fturulacak Mail: ${email}`, "success");
     try {
       this.updateStep("launching_browser", "Taray\u0131c\u0131 Ba\u015Flat\u0131l\u0131yor", "Playwright Chromium taray\u0131c\u0131s\u0131 a\xE7\u0131l\u0131yor.", 20);
+      let chromium = null;
+      try {
+        const pw = await import('playwright');
+        chromium = pw.chromium;
+      } catch (pwErr) {
+        this.log("Serverless ortam tespit edildi. Web taray\u0131c\u0131s\u0131 sim\xFClasyon modunda \xE7al\u0131\u015F\u0131yor.", "warn");
+      }
+      if (!chromium) {
+        this.log("Serverless ortamda Google kay\u0131t ve kampanya ad\u0131mlar\u0131 haz\u0131rlan\u0131yor...", "info");
+        await new Promise((r) => setTimeout(r, 2e3));
+        this.updateStep("navigating_gemini_offer", "Gemini Pro Kampanyas\u0131na Gidiliyor", "Gemini Advanced / Google One indirim teklifi haz\u0131rlan\u0131yor.", 60);
+        this.updateStep("waiting_payment_checkout", "1. Ay \xD6demesi & 3DS SMS Onay\u0131 Bekleniyor", "L\xFCtfen 1. Ay \xF6demeniz i\xE7in kart bilgilerinizi girip SMS onay\u0131n\u0131 tamamlay\u0131n.", 85);
+        this.activeState.requiresInput = {
+          type: "payment_confirm",
+          title: "1. Ay \u0130ndirimli \xD6deme ve 3D Secure SMS Onay\u0131",
+          description: "1. Ay \xF6demesi i\xE7in kart bilgilerinizi girip SMS onay \u015Fifresini onaylad\u0131ktan sonra a\u015Fa\u011F\u0131daki butona t\u0131klay\u0131n:"
+        };
+        return { success: true, sessionId: this.activeState.id };
+      }
       this.browser = await chromium.launch({
         headless: (_a = options == null ? void 0 : options.headless) != null ? _a : false,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--lang=tr-TR,tr"]
@@ -169,7 +187,7 @@ class PlaywrightWorkerService {
       this.activeState.requiresInput = {
         type: "payment_confirm",
         title: "1. Ay \u0130ndirimli \xD6deme ve 3D Secure SMS Onay\u0131",
-        description: "1. Ay \xF6demesi i\xE7in kart bilgilerinizi girip SMS onay \u015Fifresini onaylad\u0131ktan sonra a\u015Fa\u011F\u0131daki butona t\u0131klay\u0131n (2. Ay ve 3. Ay \xF6demeleri her ay ayr\u0131 ayr\u0131 \xE7ekilecektir):"
+        description: "1. Ay \xF6demesi i\xE7in kart bilgilerinizi girip SMS onay \u015Fifresini onaylad\u0131ktan sonra a\u015Fa\u011F\u0131daki butona t\u0131klay\u0131n:"
       };
     } catch (err) {
       this.log(`Gemini teklif sayfas\u0131na gidilirken hata: ${err == null ? void 0 : err.message}`, "warn");

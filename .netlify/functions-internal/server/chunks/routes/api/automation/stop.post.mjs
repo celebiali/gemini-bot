@@ -7,7 +7,6 @@ import 'node:buffer';
 import 'node:fs';
 import 'node:path';
 import 'node:crypto';
-import 'playwright';
 import '../../../_/db.mjs';
 import 'fs';
 import 'path';
