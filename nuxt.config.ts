@@ -5,6 +5,10 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-01-01',
   devtools: { enabled: true },
 
+  nitro: {
+    preset: 'netlify'
+  },
+
   app: {
     head: {
       title: 'Gemini Pro 3-Month Automated Switcher Bot',
